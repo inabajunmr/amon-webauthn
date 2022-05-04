@@ -23,8 +23,10 @@
          type: cred.type
        },
        authenticatorAttachment: cred.authenticatorAttachment,
-       id: cred.id
+       id: cred.id,
+       extensionResults: cred.getClientExtensionResults()
      });
+     console.log(document.getElementById('cred').value)
      document.cred.submit();
   }).catch(function (err) {
      alert(err);
