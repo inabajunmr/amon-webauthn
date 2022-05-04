@@ -1,9 +1,33 @@
 : cascade "include/layout.tx"
 
 : override content -> {
-<form action="register2" method="post">
-  <input type="text" id="username" placeholder="yeah">
-  <input type="submit"></input>
+<div id="options"><: $PublicKeyCredentialCreationOptions :></div>
+<form name="cred" action="register3" method="post">
+  <input id="cred" name="cred" type="hidden"/>
 </form>
-<div><: $PublicKeyCredentialCreationOptions :></div>
+<script>
+  const options = JSON.parse(document.getElementById('options').innerHTML);
+  options.user.id = Uint8Array.from(atob(options.user.id), c => c.charCodeAt(0))
+  options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0))
+  console.log(options);
+  navigator.credentials.create({publicKey:options})
+    .then(function (cred) {
+     const rawId = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+     const attestationObject = btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject)));
+     const clientDataJSON = btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON)));
+     document.getElementById('cred').value = JSON.stringify({
+       rawId: rawId,
+       response: {
+         attestationObject: attestationObject,
+         clientDataJSON: clientDataJSON,
+         type: cred.type
+       },
+       authenticatorAttachment: cred.authenticatorAttachment,
+       id: cred.id
+     });
+     document.cred.submit();
+  }).catch(function (err) {
+     alert(err);
+  });
+</script>
 : }

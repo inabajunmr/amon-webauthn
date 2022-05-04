@@ -32,16 +32,23 @@ post '/register2' => sub {
             displayName => $username
         },
         challenge => $challenge,
-        pubKeyCredParams => (
+        pubKeyCredParams => [
             {
                 type=> 'public-key',
-                alg	=> -256
-            }
-        )
+                alg	=> -7
+            },
+        ]
     };
     return $c->render('register2.tx', { 
         PublicKeyCredentialCreationOptions => encode_json($PublicKeyCredentialCreationOptions)
         });
+};
+
+post '/register3' => sub {
+    my ($c) = @_;
+    my $cred = $c->req->parameters->{cred};
+    print $cred;
+    return $c->render('index.tx');
 };
 
 post '/account/logout' => sub {
