@@ -1,0 +1,9 @@
+: cascade "include/layout.tx"
+
+: override content -> {
+<form action="register2" method="post">
+  <input type="text" id="username" placeholder="yeah">
+  <input type="submit"></input>
+</form>
+<div><: $PublicKeyCredentialCreationOptions :></div>
+: }

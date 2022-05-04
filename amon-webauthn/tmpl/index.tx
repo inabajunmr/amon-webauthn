@@ -1,0 +1,6 @@
+: cascade "include/layout.tx"
+
+: override content -> {
+<a href='/register1'>sign in</a>
+<a>register</a>
+: }
