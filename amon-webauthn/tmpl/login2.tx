@@ -1,0 +1,22 @@
+: cascade "include/layout.tx"
+
+: override content -> {
+<div id="options"><: $PublicKeyCredentialRequestOptions :></div>
+<form name="cred" action="login3" method="post">
+  <input id="assertion" name="assertion" type="hidden"/>
+</form>
+<script>
+  const options = JSON.parse(document.getElementById('options').innerHTML);
+  options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0))
+  options.allowCredentials.forEach(function (cred) {
+      cred.id = Uint8Array.from(atob(cred.id), c => c.charCodeAt(0))
+  });  
+  console.log(options);
+  navigator.credentials.get({publicKey:options})
+    .then(function (assertion) {
+     console.log(assertion)
+  }).catch(function (err) {
+     alert(err);
+  });
+</script>
+: }

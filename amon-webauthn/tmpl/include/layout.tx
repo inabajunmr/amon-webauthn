@@ -40,6 +40,9 @@
         </div><!-- /.container -->
     </div><!-- /.navbar -->
     <div class="container">
+        <a href='/register1'>register</a>
+        <a href='/login1'>login</a>
+
         <div id="main">
             <: block content -> { } :>
         </div>

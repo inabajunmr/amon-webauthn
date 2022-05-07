@@ -1,0 +1,8 @@
+: cascade "include/layout.tx"
+
+: override content -> {
+<form action="login2" method="post">
+  <input type="text" id="username" name="username" placeholder="username">
+  <input type="submit"></input>
+</form>
+: }
