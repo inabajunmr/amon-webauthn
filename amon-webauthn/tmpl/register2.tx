@@ -26,7 +26,7 @@
        id: cred.id,
        extensionResults: cred.getClientExtensionResults()
      });
-     console.log(document.getElementById('cred').value)
+     console.log(cred)
      document.cred.submit();
   }).catch(function (err) {
      alert(err);

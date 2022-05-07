@@ -9,6 +9,10 @@ use Digest::SHA qw(sha256_hex);
 use CBOR::XS;
 use Amon2::Web::Dispatcher::RouterBoom;
 
+# key is credential id.
+our $CREDENTIAL_DB = {};
+# our %CREDENTIAL_DB;
+
 get '/' => sub {
     my ($c) = @_;
     return $c->render('index.tx');
@@ -23,6 +27,7 @@ post '/register2' => sub {
     my ($c) = @_;
     my $username = $c->req->parameters->{username};
     my $userId = String::Random->new->randregex('[A-Za-z0-9]{32}');
+    $c->session->set(userId => $userId);
     my $challenge = String::Random->new->randregex('[A-Za-z0-9]{32}');
     $c->session->set(challenge => $challenge);
     my $PublicKeyCredentialCreationOptions = {
@@ -41,7 +46,8 @@ post '/register2' => sub {
                 type=> 'public-key',
                 alg	=> -7
             },
-        ]
+        ],
+        attestation => 'direct'
     };
     return $c->render('register2.tx', { 
         PublicKeyCredentialCreationOptions => encode_json($PublicKeyCredentialCreationOptions)
@@ -95,41 +101,71 @@ post '/register3' => sub {
    }
 
     # 14. Verify that the User Present bit of the flags in authData is set.
-   my $flags = substr $authData, 32, 1;
-   if(!(ord($flags) & 1)) {
+   my $flags = unpack('C', substr $authData, 32, 1);
+   if(!($flags & 1)) {
        # User Present is first bit.
        die "User Present flag is not on.";
    }
 
    # 15. If user verification is required for this registration, verify that the User Verified bit of the flags in authData is set.
-    if(!(ord($flags) & 4)) {
+    if(!($flags & 4)) {
        # User Verified is third bit.
        die "User Present flag is not on.";
    }
-
    my $signCount = substr $authData, 33, 4;
-   my $attestedCredentialData = substr $authData, 37;
-   my $aaguid = substr $attestedCredentialData, 0, 16;
-   $aaguid =~ s/(.)/sprintf '%04x', ord $1/seg;
 
-   my $credentialIdLength = substr $attestedCredentialData, 16, 2;
-   my $credentialId = substr $attestedCredentialData, 18, ord($credentialIdLength);
-   my $credentialPublicKey = substr $attestedCredentialData, 18 + ord($credentialIdLength);
+   if($flags & 64) {
+        # User Verified is seventh bit.
+        my $aaguid = substr $authData, 37, 16;
+        $aaguid =~ s/(.)/sprintf '%02x', ord $1/seg;
+        my $credentialIdLength = unpack('n', substr $authData, 53, 2);
+        my $credentialId = substr $authData, 55, $credentialIdLength;
+        my ($credentialPublicKey, $length) = CBOR::XS->new->decode_prefix(substr $authData, 55 + $credentialIdLength);
+        my $credentialPublicKeyRaw = substr $authData, 55 + $credentialIdLength, $length;
 
+        # 16. Verify that the "alg" parameter in the credential public key in authData matches the alg attribute of one of the items in options.pubKeyCredParams.
+        # A COSE Key structure: https://datatracker.ietf.org/doc/html/rfc8152#section-7
+        my $alg = $credentialPublicKey->{'3'};
+        if($alg != -7) {
+            die "alg is only allowed -7. alg:$alg.";
+        }
+
+        # 17. Verify that the values of the client extension outputs in clientExtensionResults and the authenticator extension outputs in the extensions in authData are as expected, considering the client extension input values that were given in options.extensions and any specific policy of the Relying Party regarding unsolicited extensions, i.e., those that were not specified as part of options.extensions. In the general case, the meaning of "are as expected" is specific to the Relying Party and which extensions are in use.
+        # TODO
+
+        # 18 ~ 20. verify attestation
+        # TODO
+
+        # 21. Verify that the credentialId is ≤ 1023 bytes. Credential IDs larger than this many bytes SHOULD cause the RP to fail this registration ceremony.
+        if($credentialIdLength >= 1023) {
+            die "The length of credentialId is too long. length:$credentialIdLength.";
+        }
+
+        # 22. Verify that the credentialId is not yet registered for any user. If the credentialId is already known then the Relying Party SHOULD fail this registration ceremony.
+        if(exists($CREDENTIAL_DB->{$credentialId})) {
+            die "This credential:$credentialId is already registered.";
+        }
+
+        # # 23. If the attestation statement attStmt verified successfully and is found to be trustworthy, then register the new credential with the user account that was denoted in options.user:
+        my $userId = $c->session->get('userId');
+        $CREDENTIAL_DB->{$credentialId} = {pubKey => $credentialPublicKeyRaw, userId => $userId};
+
+        # 24. If the attestation statement attStmt successfully verified but is not trustworthy per step 20 above, the Relying Party SHOULD fail the registration ceremony.
+        # TODO
+
+        return $c->render('register3.tx', {
+            cred => encode_json($CREDENTIAL_DB->{$credentialId})
+        });
+   }
 
    # my $attestedCredentialData = substr $authData, 39;
    # my $extensions;    
+#    $flags =~ s/(.)/sprintf '%08b', ord $1/seg;
    no bytes;
-
-
-
-
-
-
     return $c->render('register3.tx', {
         cred => encode_json(
    {
-       aaguid => $aaguid
+       aaguid => 'fuck'
    }            
         )
     });
