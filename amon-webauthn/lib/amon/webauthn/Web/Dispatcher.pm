@@ -88,24 +88,18 @@ post '/register3' => sub {
         die "origin unmatched. C.origin:" . $cdata->{origin};
     }
 
-    # 10. Verify that the value of C.tokenBinding.status matches the state of Token Binding for the TLS connection over which the assertion was obtained. If Token Binding was used on that TLS connection, also verify that C.tokenBinding.id matches the base64url encoding of the Token Binding ID for the connection.
-    if ( defined( $cdata->{tokenBinding} ) ) {
-        my $tokenBindingStatus = $cdata->{tokenBinding}->{status};
-        # verify token binding
-    }
-
-    # 11. Let hash be the result of computing a hash over response.clientDataJSON using SHA-256.
+    # 10. Let hash be the result of computing a hash over response.clientDataJSON using SHA-256.
     my $clientDataJsonHash =
       sha256_hex( decode_base64( $response->{response}->{clientDataJSON} ) );
 
-    # 12. Perform CBOR decoding on the attestationObject field of the AuthenticatorAttestationResponse structure to obtain the attestation statement format fmt, the authenticator data authData, and the attestation statement attStmt.
+    # 11. Perform CBOR decoding on the attestationObject field of the AuthenticatorAttestationResponse structure to obtain the attestation statement format fmt, the authenticator data authData, and the attestation statement attStmt.
     my $attestationObject = decode_cbor(
         decode_base64( $response->{response}->{attestationObject} ) );
 
     # authData structure: https://www.w3.org/TR/2021/REC-webauthn-2-20210408/#sctn-authenticator-data
     my $authData = $attestationObject->{authData};
 
-    # 13. Verify that the rpIdHash in authData is the SHA-256 hash of the RP ID expected by the Relying Party.
+    # 12. Verify that the rpIdHash in authData is the SHA-256 hash of the RP ID expected by the Relying Party.
     my $rpIdHash = substr $authData, 0, 32;
     $rpIdHash =~ s/(.)/sprintf '%02x', ord $1/seg;
     if ( !( $rpIdHash eq sha256_hex('localhost') ) ) {
@@ -115,14 +109,14 @@ post '/register3' => sub {
           . sha256_hex('localhost');
     }
 
-    # 14. Verify that the User Present bit of the flags in authData is set.
+    # 13. Verify that the User Present bit of the flags in authData is set.
     my $flags = unpack( 'C', substr $authData, 32, 1 );
     if ( !( $flags & 1 ) ) {
         # User Present is first bit.
         die "User Present flag is not on.";
     }
 
-    # 15. If user verification is required for this registration, verify that the User Verified bit of the flags in authData is set.
+    # 14. If the Relying Party requires user verification for this registration, verify that the User Verified bit of the flags in authData is set.
     if ( !( $flags & 4 ) ) {
         # User Verified is third bit.
         die "User Present flag is not on.";
@@ -143,17 +137,67 @@ post '/register3' => sub {
     my $credentialPublicKeyRaw = substr $authData, 55 + $credentialIdLength,
       $length;
 
-    # 16. Verify that the "alg" parameter in the credential public key in authData matches the alg attribute of one of the items in options.pubKeyCredParams.
+    # 15. Verify that the "alg" parameter in the credential public key in authData matches the alg attribute of one of the items in options.pubKeyCredParams.
     # A COSE Key structure: https://datatracker.ietf.org/doc/html/rfc8152#section-7
-    my $alg = $credentialPublicKey->{'3'};
-    if ( $alg != -7 ) {
+    if ( $credentialPublicKey->{'3'} != -7 ) {
         die "alg is only allowed -7. alg:$alg.";
     }
 
-    # 17. Verify that the values of the client extension outputs in clientExtensionResults and the authenticator extension outputs in the extensions in authData are as expected, considering the client extension input values that were given in options.extensions and any specific policy of the Relying Party regarding unsolicited extensions, i.e., those that were not specified as part of options.extensions. In the general case, the meaning of "are as expected" is specific to the Relying Party and which extensions are in use.
+    # 16. Verify that the values of the client extension outputs in clientExtensionResults and the authenticator extension outputs in the extensions in authData are as expected, considering the client extension input values that were given in options.extensions and any specific policy of the Relying Party regarding unsolicited extensions, i.e., those that were not specified as part of options.extensions. In the general case, the meaning of "are as expected" is specific to the Relying Party and which extensions are in use.
     # TODO
 
-    # 18 ~ 20. verify attestation
+    # 17. Determine the attestation statement format by performing a USASCII case-sensitive match on fmt against the set of supported WebAuthn Attestation Statement Format Identifier values. An up-to-date list of registered WebAuthn Attestation Statement Format Identifier values is maintained in the IANA "WebAuthn Attestation Statement Format Identifiers" registry [IANA-WebAuthn-Registries] established by [RFC8809].
+
+    # packed attestation structure: https://w3c.github.io/webauthn/#sctn-packed-attestation
+    my $fmt = $attestationObject->{fmt};
+    unless($fmt eq 'packed') {
+        die "packed attestation only supported. fmt: $fmt.";
+    }
+
+    # 18. Verify that attStmt is a correct attestation statement, conveying a valid attestation signature, by using the attestation statement format fmt’s verification procedure given attStmt, authData and hash.
+    my $attStmt = $attestationObject->{attStmt};
+    my $alg = $attStmt->{alg};
+    my $sig = $attStmt->{sig};
+    my $x5c = $attStmt->{x5c};
+
+    if($x5c) {
+        die "only self attestation supported.";
+    }
+
+    # Validate that alg matches the algorithm of the credentialPublicKey in authenticatorData.
+    unless($alg == -7) {
+        die "alg is only allowed -7. alg:$alg.";
+    }
+
+    # Verify that sig is a valid signature over the concatenation of authenticatorData and clientDataHash using the credential public key with alg.
+    # supported only ECC
+    # ref. https://github.com/LemonLDAPNG/Authen-WebAuthn/blob/main/lib/Authen/WebAuthn.pm#L478
+    my $curve       = $credentialPublicKey->{-1};
+    my $x           = $credentialPublicKey->{-2};
+    my $y           = $credentialPublicKey->{-3};
+    my $id_to_curve = { 1 => 'secp256r1', };
+    my $pk         = Crypt::PK::ECC->new();
+    my $curve_name = $id_to_curve->{$curve};
+    unless ($curve_name) {
+        die "Unsupported curve $curve";
+    }
+    $pk->import_key( {
+            curve_name => $curve_name,
+            pub_x      => unpack( "H*", $x ),
+            pub_y      => unpack( "H*", $y ),
+        }
+    );
+    unless($pk->verify_message(
+        $sig, 
+        $authData . sha256(decode_base64( $response->{response}->{clientDataJSON} )),
+         ("SHA256"))) {
+        die "Failed to verify signature."
+    }
+
+    # 19. If validation is successful, obtain a list of acceptable trust anchors (i.e. attestation root certificates) for that attestation type and attestation statement format fmt, from a trusted source or from policy. For example, the FIDO Metadata Service [FIDOMetadataService] provides one way to obtain such information, using the aaguid in the attestedCredentialData in authData.
+    # TODO
+
+    # 20. Assess the attestation trustworthiness using the outputs of the verification procedure in step 19, as follows:
     # TODO
 
     # 21. Verify that the credentialId is ≤ 1023 bytes. Credential IDs larger than this many bytes SHOULD cause the RP to fail this registration ceremony.
