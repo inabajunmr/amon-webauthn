@@ -13,7 +13,7 @@ use Amon2::Web::Dispatcher::RouterBoom;
 use Log::Minimal;
 use Data::Dumper;
 
-# key is credential id.
+# key is credentialId. fields are pubKey, username, signCount.
 our $CREDENTIAL_DB = {};
 
 get '/' => sub {
@@ -52,7 +52,7 @@ post '/register2' => sub {
         ],
         attestation => 'direct',
         authenticatorSelection => {
-            userVerification => 'discouraged'
+            userVerification => 'preferred'
         }
     };
     return $c->render(
@@ -104,7 +104,6 @@ post '/register3' => sub {
 
     # authData structure: https://www.w3.org/TR/2021/REC-webauthn-2-20210408/#sctn-authenticator-data
     my $authData = $attestationObject->{authData};
-    use bytes;
 
     # 13. Verify that the rpIdHash in authData is the SHA-256 hash of the RP ID expected by the Relying Party.
     my $rpIdHash = substr $authData, 0, 32;
@@ -124,11 +123,11 @@ post '/register3' => sub {
     }
 
     # 15. If user verification is required for this registration, verify that the User Verified bit of the flags in authData is set.
-    # if ( !( $flags & 4 ) ) {
-    #     # User Verified is third bit.
-    #     die "User Present flag is not on.";
-    # }
-    my $signCount = substr $authData, 33, 4;
+    if ( !( $flags & 4 ) ) {
+        # User Verified is third bit.
+        die "User Present flag is not on.";
+    }
+    my $signCount = unpack( 'N', substr $authData, 33, 4);
 
     if ( !( $flags & 64 ) ) {
         # Attested credential data included.
@@ -171,18 +170,15 @@ post '/register3' => sub {
     # # 23. If the attestation statement attStmt verified successfully and is found to be trustworthy, then register the new credential with the user account that was denoted in options.user:
     my $username = $c->session->get('username');
     $CREDENTIAL_DB->{$credentialId} =
-      { pubKey => $credentialPublicKeyRaw, username => $username };
+      { pubKey => $credentialPublicKeyRaw, username => $username , signCount=> $signCount};
 
     # 24. If the attestation statement attStmt successfully verified but is not trustworthy per step 20 above, the Relying Party SHOULD fail the registration ceremony.
     # TODO
+    $authData =~ s/(.)/sprintf '%08b', ord $1/seg;
 
     return $c->render(
-        'register3.tx',
-        {
-            cred => encode_json( $CREDENTIAL_DB->{$credentialId} )
-        }
+        'register3.tx'
     );
-    no bytes;
 };
 
 get '/login1' => sub {
@@ -236,8 +232,9 @@ post '/login3' => sub {
     # 6. Identify the user being authenticated and verify that this user is the owner of the public key credential source credentialSource identified by credential.id:
     # ↪ If the user was identified before the authentication ceremony was initiated, e.g., via a username or cookie, verify that the identified user is the owner of credentialSource.
     my $username = $c->session->get('username');
-    my $credentialOwnerUsername = $CREDENTIAL_DB->{urlsafe_b64decode($response->{id})}->{username};
-    if(!($credentialOwnerUsername eq $username)) {
+    my $storedCredential = $CREDENTIAL_DB->{urlsafe_b64decode($response->{id})};
+    my $credentialOwnerUsername = $storedCredential->{username};
+    unless($credentialOwnerUsername eq $username) {
         die "username nmatched. credential owner: $credentialOwnerUsername username:$username.";
     }
     
@@ -248,7 +245,7 @@ post '/login3' => sub {
     # TODO userHandle will match user.id for registration.
 
     # 7. Using credential.id (or credential.rawId, if base64url encoding is inappropriate for your use case), look up the corresponding credential public key and let credentialPublicKey be that credential public key.
-    my $credentialPublicKey = $CREDENTIAL_DB->{urlsafe_b64decode($response->{id})}->{pubKey};
+    my $credentialPublicKey = $storedCredential->{pubKey};
 
     # 8. Let cData, authData and sig denote the value of response’s clientDataJSON, authenticatorData, and signature respectively.
     my $authData = $response->{response}->{authenticatorData};
@@ -259,28 +256,26 @@ post '/login3' => sub {
     my $cData = decode_json( decode_base64($response->{response}->{clientDataJSON}));
 
     # 11. Verify that the value of C.type is the string webauthn.get.
-    if(!($cData->{type} eq 'webauthn.get')) {
+    unless($cData->{type} eq 'webauthn.get') {
         die $cData->{type} . "is not 'webauthn.get'.";
     }
 
     # 12. Verify that the value of C.challenge equals the base64url encoding of options.challenge.
     my $challenge = $c->session->get('challenge');
-    if ( !( $cData->{challenge} eq $challenge ) ) {
+    unless( $cData->{challenge} eq $challenge ) {
         die "challenge unmatched.";
     }
 
     # 13. Verify that the value of C.origin matches the Relying Party's origin.
-    if ( !( $cData->{origin} eq 'http://localhost:5000' ) ) {
+    unless( $cData->{origin} eq 'http://localhost:5000' )  {
         die "origin unmatched. C.origin:" . $cData->{origin};
     }
 
     # 14. Verify that the rpIdHash in authData is the SHA-256 hash of the RP ID expected by the Relying Party.
-    use bytes;    
     my $rpIdHash = substr urlsafe_b64decode($authData), 0, 32;
     $rpIdHash =~ s/(.)/sprintf '%02x', ord $1/seg;
-    if ( !( $rpIdHash eq sha256_hex('localhost') ) ) {
+    unless ( $rpIdHash eq sha256_hex('localhost') ) {
         $authData =~ s/(.)/sprintf '%02x', ord $1/seg;
-
         die "rpIdHash unmatched. rpIdHash:"
           . $rpIdHash
           . " expected:"
@@ -289,17 +284,16 @@ post '/login3' => sub {
 
     # 15. Verify that the User Present bit of the flags in authData is set.
     my $flags = unpack( 'C', substr $authData, 32, 1 );
-    if ( !( $flags & 1 ) ) {
+    unless( $flags & 1 )  {
         # User Present is first bit.
         die "User Present flag is not on.";
     }
 
     # 16. If user verification is required for this registration, verify that the User Verified bit of the flags in authData is set.
-    # if ( !( $flags & 4 ) ) {
-    #     # User Verified is third bit.
-    #     die "User Present flag is not on.";
-    # }
-    my $signCount = substr $authData, 33, 4;
+    if ( !( $flags & 4 ) ) {
+        # User Verified is third bit.
+        die "User Present flag is not on.";
+    }
 
     # 17. Verify that the values of the client extension outputs in clientExtensionResults and the authenticator extension outputs in the extensions in authData are as expected, considering the client extension input values that were given in options.extensions and any specific policy of the Relying Party regarding unsolicited extensions, i.e., those that were not specified as part of options.extensions. In the general case, the meaning of "are as expected" is specific to the Relying Party and which extensions are in use.
     # TODO
@@ -330,12 +324,22 @@ post '/login3' => sub {
         die "Failed to verify signature."
     }
 
-    return $c->render(
-        'login3.tx',
-        {
-            cred =>
-              encode_json($cData->{type})
+    # 20. Let storedSignCount be the stored signature counter value associated with credential.id. If authData.signCount is nonzero or storedSignCount is nonzero, then run the following sub-step:
+    my $signCount = unpack( 'N', substr urlsafe_b64decode($authData), 33, 4);
+    my $storedSignCount = $storedCredential->{signCount};
+    if($signCount != 0 || $storedSignCount != 0 ) {
+        # If authData.signCount is
+        # ↪ greater than storedSignCount:
+        # Update storedSignCount to be the value of authData.signCount.
+        if($signCount > $storedSignCount) {
+            $storedCredential->{signCount} = $signCount;
+        } else {
+            die "storedSignCount:$storedSignCount is more than signCount:$signCount.";
         }
+    }
+
+    return $c->render(
+        'login3.tx'
     );
 
 };
