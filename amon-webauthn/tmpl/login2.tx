@@ -2,9 +2,10 @@
 
 : override content -> {
 <div id="options"><: $PublicKeyCredentialRequestOptions :></div>
-<form name="cred" action="login3" method="post">
+<form name="assertion" action="login3" method="post">
   <input id="assertion" name="assertion" type="hidden"/>
 </form>
+<script src="https://bundle.run/buffer@6.0.3"></script>
 <script>
   const options = JSON.parse(document.getElementById('options').innerHTML);
   options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0))
@@ -12,9 +13,26 @@
       cred.id = Uint8Array.from(atob(cred.id), c => c.charCodeAt(0))
   });  
   console.log(options);
+  // 2. Call navigator.credentials.get() and pass options as the publicKey option. Let credential be the result of the successfully resolved promise. If the promise is rejected, abort the ceremony with a user-visible error, or otherwise guide the user experience as might be determinable from the context available in the rejected promise. For information on different error contexts and the circumstances leading to them, see § 6.3.3 The authenticatorGetAssertion Operation.
   navigator.credentials.get({publicKey:options})
     .then(function (assertion) {
      console.log(assertion)
+
+     document.getElementById('assertion').value = JSON.stringify({
+       authenticatorAttachment: assertion.authenticatorAttachment,
+       id: assertion.id,
+       rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+       response: {
+         authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+         clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+         signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+         userHandle: btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))),
+       },
+       type: assertion.type,
+       clientExtensionResults: assertion.getClientExtensionResults() // 4. Let clientExtensionResults be the result of calling credential.getClientExtensionResults().
+     });
+     console.log(document.getElementById('assertion').value);  
+     document.assertion.submit();
   }).catch(function (err) {
      alert(err);
   });
