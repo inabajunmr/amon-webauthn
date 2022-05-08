@@ -329,11 +329,13 @@ post '/login3' => sub {
     my $storedSignCount = $storedCredential->{signCount};
     if($signCount != 0 || $storedSignCount != 0 ) {
         # If authData.signCount is
-        # ↪ greater than storedSignCount:
-        # Update storedSignCount to be the value of authData.signCount.
         if($signCount > $storedSignCount) {
+            # ↪ greater than storedSignCount:
+            # Update storedSignCount to be the value of authData.signCount.
             $storedCredential->{signCount} = $signCount;
         } else {
+            # ↪ less than or equal to storedSignCount:
+            # This is a signal that the authenticator may be cloned, i.e. at least two copies of the credential private key may exist and are being used in parallel. Relying Parties should incorporate this information into their risk scoring. Whether the Relying Party updates storedSignCount in this case, or not, or fails the authentication ceremony or not, is Relying Party-specific.
             die "storedSignCount:$storedSignCount is more than signCount:$signCount.";
         }
     }
