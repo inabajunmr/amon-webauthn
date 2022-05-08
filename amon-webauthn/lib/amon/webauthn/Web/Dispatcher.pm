@@ -341,7 +341,6 @@ post '/login3' => sub {
     return $c->render(
         'login3.tx'
     );
-
 };
 
 post '/account/logout' => sub {
